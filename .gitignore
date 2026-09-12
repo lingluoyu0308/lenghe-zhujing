@@ -1,0 +1,26 @@
+# 依赖目录
+node_modules/
+
+# 桌面应用打包输出
+dist/
+dist-new/
+
+# 系统文件
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# 编辑器
+.vscode/
+.idea/
+*.swp
+
+# 日志
+*.log
+npm-debug.log*
+
+# 本地数据备份（用户数据不上传）
+*.json.bak
+
+# 临时脚本
+png2ico.js
