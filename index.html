@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0d6efd">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="棱禾筑境">
+<title>棱禾筑境 · 施工管理系统</title>
+<link rel="icon" type="image/png" href="assets/logo.png">
+<link rel="shortcut icon" href="assets/logo.ico">
+<link rel="stylesheet" href="css/style.css?v=20260912h">
+<!-- SheetJS 用于导出 Excel（先尝试本地文件，失败则用 CDN） -->
+<script src="js/xlsx.full.min.js"></script>
+<script>
+// 若本地 xlsx 加载失败，回退到 CDN
+if (typeof XLSX === 'undefined') {
+  document.write('<script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"><\/script>');
+}
+</script>
+</head>
+<body>
+
+<!-- ===== 顶部导航 ===== -->
+<header class="app-header">
+  <h1>棱禾筑境 · 施工管理系统</h1>
+  <div class="header-sub">材料下单管理 · 项目安装排期 · 一体化管理</div>
+  <div class="module-tabs">
+    <div class="module-tab active" data-module="order" onclick="switchModule('order')">📦 材料下单</div>
+    <div class="module-tab" data-module="plan" onclick="switchModule('plan')">📅 安装排期</div>
+  </div>
+  <!-- 全局数据管理：备份与导入，对整个程序有效 -->
+  <div class="global-data-actions">
+    <button class="btn btn-backup" onclick="orderModule.exportAllBackup()" title="一键备份全部数据（下单表+排期表）">💾 一键备份</button>
+    <button class="btn btn-import" onclick="document.getElementById('globalImportInput').click()" title="导入数据（支持JSON全量备份或XLSX下单表）">📥 导入数据</button>
+    <input type="file" id="globalImportInput" accept=".json,.xlsx,.xls,application/json" style="display:none" onchange="orderModule.importData(event)">
+  </div>
+</header>
+
+<!-- ===== 模块1：施工材料下单管理 ===== -->
+<div class="module-content active" id="orderModule">
+  <!-- 工具栏 -->
+  <div style="padding: 14px 16px 0;">
+    <div class="toolbar" style="margin-top:0;">
+      <button class="btn btn-primary" onclick="orderModule.openAddModal()">+ 新增</button>
+      <button class="btn" onclick="orderModule.openCatalogModal()" style="background:#fff;color:var(--primary-dark);font-weight:600;">参考清单</button>
+      <button class="btn btn-success" onclick="orderModule.exportXLSX()">📊 导出表格</button>
+    </div>
+  </div>
+
+  <!-- 待办提醒区 -->
+  <section class="todo-section">
+    <h2 class="section-title">待办提醒</h2>
+    <div class="todo-cards" id="orderTodoCards"></div>
+  </section>
+
+  <!-- 筛选搜索栏 -->
+  <section class="filter-section">
+    <select id="orderFilterStatus" onchange="orderModule.renderAll()">
+      <option value="">全部状态</option>
+      <option value="pending">待下单</option>
+      <option value="ordered">已下单</option>
+      <option value="arrived">已到货</option>
+      <option value="installed">已安装</option>
+    </select>
+    <select id="orderFilterProject" onchange="orderModule.renderAll()">
+      <option value="">全部项目</option>
+    </select>
+    <input type="search" id="orderSearchInput" placeholder="搜索主材/电器/品牌/备注..." oninput="orderModule.renderAll()">
+  </section>
+
+  <!-- 批量操作工具栏 -->
+  <section class="batch-bar" id="orderBatchBar">
+    <span class="batch-count">已选 <b id="orderBatchCount">0</b> 项</span>
+    <button class="btn btn-sm btn-primary" onclick="orderModule.openBatchEditModal()">✏️ 批量修改</button>
+    <button class="btn btn-sm btn-danger" onclick="orderModule.batchDelete()">批量删除</button>
+    <button class="btn btn-sm" onclick="orderModule.clearSelection()">取消选择</button>
+  </section>
+
+  <!-- 主数据表 -->
+  <section class="table-wrap">
+    <table class="data-table" id="orderDataTable">
+      <thead>
+        <tr>
+          <th style="width:36px;padding:8px 6px;"><input type="checkbox" id="orderSelectAllCheckbox" onchange="orderModule.toggleSelectAll(this)" title="全选当前筛选结果"></th>
+          <th onclick="orderModule.setSort('project')">客户/房屋<span class="sort-arrow" id="sort-project"></span></th>
+          <th onclick="orderModule.setSort('material')">主材/电器<span class="sort-arrow" id="sort-material"></span></th>
+          <th>规格型号</th>
+          <th>单位</th>
+          <th onclick="orderModule.setSort('quantity')">数量<span class="sort-arrow" id="sort-quantity"></span></th>
+          <th onclick="orderModule.setSort('expectedDate')">预计下单<span class="sort-arrow" id="sort-expectedDate"></span></th>
+          <th>品牌/供应商</th>
+          <th>联系电话</th>
+          <th onclick="orderModule.setSort('unitPrice')">单价<span class="sort-arrow" id="sort-unitPrice"></span></th>
+          <th onclick="orderModule.setSort('amount')">金额<span class="sort-arrow" id="sort-amount"></span></th>
+          <th onclick="orderModule.setSort('status')">状态<span class="sort-arrow" id="sort-status"></span></th>
+          <th>备注</th>
+          <th>操作</th>
+        </tr>
+      </thead>
+      <tbody id="orderTableBody"></tbody>
+    </table>
+    <div class="card-view" id="orderCardView"></div>
+    <div class="empty-state" id="orderEmptyState" style="display:none">
+      <div class="emoji">📦</div>
+      <div>暂无记录，点击"+ 新增"开始添加</div>
+    </div>
+  </section>
+
+  <!-- 底部统计栏 -->
+  <footer class="stats-bar">
+    <div class="stat-item"><div class="stat-num" id="orderStatTotal">0</div><div class="stat-label">总记录</div></div>
+    <div class="stat-item"><div class="stat-num" id="orderStatPending">0</div><div class="stat-label">待下单</div></div>
+    <div class="stat-item"><div class="stat-num" id="orderStatOrdered">0</div><div class="stat-label">已下单</div></div>
+    <div class="stat-item"><div class="stat-num" id="orderStatAmount">¥0</div><div class="stat-label">总金额</div></div>
+  </footer>
+
+  <!-- 编辑模态框 -->
+  <div class="modal-mask" id="orderEditModal">
+    <div class="modal">
+      <h2 id="orderModalTitle">新增记录</h2>
+      <div class="form-grid">
+        <div class="form-item full">
+          <label>客户/房屋 *</label>
+          <input type="text" id="f_project" placeholder="如：张宅·全屋主材 / 王府小区2-1601">
+        </div>
+        <div class="form-item">
+          <label>主材/电器 *</label>
+          <input type="text" id="f_material" list="materialList" placeholder="如：木地板 / 油烟机">
+          <datalist id="materialList"></datalist>
+        </div>
+        <div class="form-item">
+          <label>规格型号</label>
+          <input type="text" id="f_spec" placeholder="如：800x800 / A1型号">
+        </div>
+        <div class="form-item">
+          <label>单位</label>
+          <input type="text" id="f_unit" placeholder="如：块 / 套 / 米 / 平">
+        </div>
+        <div class="form-item">
+          <label>数量 *</label>
+          <input type="number" id="f_quantity" step="0.01" min="0" placeholder="0" oninput="orderModule.calcAmount()">
+        </div>
+        <div class="form-item">
+          <label>预计下单日期 *</label>
+          <div style="display:flex;gap:6px;align-items:center;">
+            <input type="date" id="f_expectedDate" style="flex:1;">
+            <button type="button" class="btn btn-sm" onclick="orderModule.openDateRefModal()" style="background:#e8f0fe;color:var(--primary-dark);white-space:nowrap;flex-shrink:0;">📅 引用排期</button>
+          </div>
+        </div>
+        <div class="form-item">
+          <label>品牌/供应商</label>
+          <input type="text" id="f_supplier" placeholder="如：方太 / 东鹏 / 美的">
+        </div>
+        <div class="form-item">
+          <label>联系电话</label>
+          <input type="tel" id="f_contact" placeholder="如：13800138000 / 400-xxx-xxxx">
+        </div>
+        <div class="form-item">
+          <label>单价（元）</label>
+          <input type="number" id="f_unitPrice" step="0.01" min="0" placeholder="0" oninput="orderModule.calcAmount()">
+        </div>
+        <div class="form-item">
+          <label>金额（自动计算）</label>
+          <div class="amount-display" id="f_amount">¥0.00</div>
+        </div>
+        <div class="form-item">
+          <label>状态</label>
+          <div class="status-radio-group">
+            <label><input type="radio" name="orderStatus" value="pending"><span>待下单</span></label>
+            <label><input type="radio" name="orderStatus" value="ordered"><span>已下单</span></label>
+            <label><input type="radio" name="orderStatus" value="arrived"><span>已到货</span></label>
+            <label><input type="radio" name="orderStatus" value="installed"><span>已安装</span></label>
+          </div>
+        </div>
+        <div class="form-item full">
+          <label>备注</label>
+          <textarea id="f_remark" rows="2" placeholder="其他说明..."></textarea>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-danger" onclick="orderModule.closeModal()">取消</button>
+        <button class="btn btn-primary" onclick="orderModule.saveRecord()" style="background:var(--primary);color:#fff;">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 批量修改模态框 -->
+  <div class="modal-mask" id="batchEditModal">
+    <div class="modal">
+      <h2>批量修改</h2>
+      <div style="font-size:13px;color:var(--text-light);margin-bottom:12px;">
+        勾选需要修改的字段并填入新值，未勾选的字段保持不变。将应用到 <b id="batchEditCount" style="color:var(--primary);">0</b> 条选中记录。
+      </div>
+      <div class="form-grid" style="grid-template-columns:1fr;gap:10px;">
+        <div class="batch-edit-field">
+          <label class="batch-edit-label"><input type="checkbox" id="batch_project" onchange="orderModule.toggleBatchField('project')"> 项目名称</label>
+          <input type="text" class="form-input batch-edit-input" id="batch_project_val" disabled placeholder="输入新的项目名称">
+        </div>
+        <div class="batch-edit-field">
+          <label class="batch-edit-label"><input type="checkbox" id="batch_supplier" onchange="orderModule.toggleBatchField('supplier')"> 品牌/供应商</label>
+          <input type="text" class="form-input batch-edit-input" id="batch_supplier_val" disabled placeholder="输入新的品牌/供应商">
+        </div>
+        <div class="batch-edit-field">
+          <label class="batch-edit-label"><input type="checkbox" id="batch_contact" onchange="orderModule.toggleBatchField('contact')"> 联系电话</label>
+          <input type="text" class="form-input batch-edit-input" id="batch_contact_val" disabled placeholder="输入新的联系电话">
+        </div>
+        <div class="batch-edit-field">
+          <label class="batch-edit-label"><input type="checkbox" id="batch_expectedDate" onchange="orderModule.toggleBatchField('expectedDate')"> 预计下单日期</label>
+          <input type="date" class="form-input batch-edit-input" id="batch_expectedDate_val" disabled>
+        </div>
+        <div class="batch-edit-field">
+          <label class="batch-edit-label"><input type="checkbox" id="batch_status" onchange="orderModule.toggleBatchField('status')"> 状态</label>
+          <select class="form-input batch-edit-input" id="batch_status_val" disabled>
+            <option value="pending">待下单</option>
+            <option value="ordered">已下单</option>
+            <option value="arrived">已到货</option>
+            <option value="installed">已安装</option>
+          </select>
+        </div>
+        <div class="batch-edit-field">
+          <label class="batch-edit-label"><input type="checkbox" id="batch_remark" onchange="orderModule.toggleBatchField('remark')"> 备注</label>
+          <input type="text" class="form-input batch-edit-input" id="batch_remark_val" disabled placeholder="输入新的备注">
+        </div>
+      </div>
+      <div class="form-actions" style="margin-top:18px;">
+        <button class="btn" onclick="orderModule.closeBatchEditModal()">取消</button>
+        <button class="btn btn-primary" onclick="orderModule.batchEdit()" style="background:var(--primary);color:#fff;">确认修改</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 引用施工排期日期模态框 -->
+  <div class="modal-mask" id="dateRefModal">
+    <div class="modal">
+      <h2>从施工计划表引用日期</h2>
+      <div style="font-size:13px;color:var(--text-light);margin-bottom:12px;">
+        点击下方任一排期项，即可将其计划日期填入"预计下单日期"字段。<br>
+        下单日期可提前于施工日期（通常提前 7~15 天下单）。
+      </div>
+      <div style="display:flex;gap:8px;margin-bottom:12px;">
+        <div id="refTabConstruction" class="plan-tab tab-active" style="flex:1;text-align:center;padding:8px;border-radius:8px;cursor:pointer;font-size:13px;" onclick="orderModule.switchRefTab('construction')">工地施工计划表</div>
+        <div id="refTabInstall" class="plan-tab tab-normal" style="flex:1;text-align:center;padding:8px;border-radius:8px;cursor:pointer;font-size:13px;background:#f0f4f9;" onclick="orderModule.switchRefTab('install')">安装进度计划表</div>
+      </div>
+      <div id="dateRefList" style="max-height:50vh;overflow-y:auto;"></div>
+      <div class="modal-actions">
+        <button class="btn btn-danger" onclick="orderModule.closeDateRefModal()">取消</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 参考清单模态框 -->
+  <div class="modal-mask catalog-modal" id="catalogModal">
+    <div class="modal">
+      <h2>家装主材·电器参考清单</h2>
+      <div class="catalog-toolbar">
+        <button class="btn btn-sm btn-primary" onclick="orderModule.catalogSelectAll(true)">全选</button>
+        <button class="btn btn-sm" onclick="orderModule.catalogSelectAll(false)">清空</button>
+        <span class="count-info">已勾选 <b id="catalogCount">0</b> 项</span>
+      </div>
+      <div class="catalog-body" id="catalogBody"></div>
+      <div class="catalog-actions">
+        <button class="btn btn-danger" onclick="orderModule.closeCatalogModal()">取消</button>
+        <button class="btn btn-primary" onclick="orderModule.catalogGoFillStep()" style="background:var(--primary);color:#fff;">下一步：统一填写资料</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 统一填写资料模态框 -->
+  <div class="modal-mask catalog-modal" id="catalogFillModal">
+    <div class="modal">
+      <h2>统一填写资料</h2>
+      <div style="font-size:13px;color:var(--text-light);margin-bottom:14px;">
+        下方填写的资料将应用到本次勾选的 <b id="fillCount" style="color:var(--primary-dark);">0</b> 个项目。<br>
+        留空的字段不影响后续逐条编辑。
+      </div>
+      <div class="form-grid">
+        <div class="form-item full">
+          <label>客户/房屋（统一）</label>
+          <input type="text" id="g_project" placeholder="如：张宅·全屋主材 / 王府小区2-1601">
+        </div>
+        <div class="form-item">
+          <label>预计下单日期（统一）</label>
+          <input type="date" id="g_expectedDate">
+        </div>
+        <div class="form-item">
+          <label>状态（统一）</label>
+          <select id="g_status">
+            <option value="pending">待下单</option>
+            <option value="ordered">已下单</option>
+            <option value="arrived">已到货</option>
+            <option value="installed">已安装</option>
+          </select>
+        </div>
+        <div class="form-item">
+          <label>品牌/供应商（统一）</label>
+          <input type="text" id="g_supplier" placeholder="如：方太 / 东鹏 / 美的">
+        </div>
+        <div class="form-item">
+          <label>联系电话（统一）</label>
+          <input type="tel" id="g_contact" placeholder="如：13800138000 / 400-xxx-xxxx">
+        </div>
+        <div class="form-item full">
+          <label>统一备注追加</label>
+          <input type="text" id="g_remark" placeholder="将追加到原分类备注后，留空则保持原备注">
+        </div>
+      </div>
+      <div class="catalog-actions">
+        <button class="btn btn-danger" onclick="orderModule.closeFillModal()">上一步</button>
+        <button class="btn btn-primary" onclick="orderModule.catalogConfirmAdd()" style="background:var(--primary);color:#fff;">确认加入下单表</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="orderToast"></div>
+</div>
+
+<!-- ===== 模块2：项目安装排期 ===== -->
+<div class="module-content" id="planModule">
+  <div class="container">
+    <div id="planApp"></div>
+  </div>
+  <canvas id="exportCanvas" width="900" height="1200" style="display:none"></canvas>
+</div>
+
+<!-- ===== 脚本加载 ===== -->
+<script src="js/dateUtils.js?v=20260912h"></script>
+<script src="js/orderModule.js?v=20260912h"></script>
+<script src="js/planModule.js?v=20260912h"></script>
+<script>
+// 模块切换
+function switchModule(mod) {
+  document.querySelectorAll('.module-tab').forEach(t => {
+    t.classList.toggle('active', t.dataset.module === mod);
+  });
+  document.querySelectorAll('.module-content').forEach(c => {
+    c.classList.toggle('active', c.id === mod + 'Module');
+  });
+}
+
+// 页面加载完成后初始化两个模块
+document.addEventListener('DOMContentLoaded', function() {
+  try { orderModule.init(); } catch(e) { console.error('下单模块初始化失败:', e); }
+  try { planModule.init(); } catch(e) { console.error('排期模块初始化失败:', e); }
+});
+</script>
+</body>
+</html>
